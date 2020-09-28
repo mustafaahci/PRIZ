@@ -1,0 +1,11 @@
+#MainFrame{
+    background-color: #212121;
+}
+
+#entry{
+    border: none;
+    outline: none;
+    background-color: transparent;
+    color: white;
+    font: 24px Comfortaa;
+}
