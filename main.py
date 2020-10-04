@@ -6,10 +6,10 @@ import ctypes
 from ctypes import wintypes
 from time import time, sleep
 
-from PySide2.QtCore import QRect, Qt, QSize, QFileInfo
-from PySide2.QtGui import QPixmap, QPalette
+from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp
+from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont
 from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLineEdit, QLabel, QHBoxLayout, \
-    QListWidget, QListWidgetItem, QFileIconProvider, QFileSystemModel, QSplashScreen
+    QListWidget, QListWidgetItem, QFileIconProvider, QFileSystemModel, QSplashScreen, QTextEdit
 
 import win32api
 import win32gui
@@ -63,8 +63,8 @@ class ListWidget(QWidget):
         self.hLayout = QHBoxLayout()
 
         # STAFF
-        self.app_name.setStyleSheet("color: #FFFFFF; font: 14px Comfortaa")
-        self.app_description.setStyleSheet("color: rgba(255,255,255,.5);")
+        self.app_name.setStyleSheet("color: #FFFFFF; font: 16px Rajdhani")
+        self.app_description.setStyleSheet("color: rgba(255,255,255,.5); font: 14px Rajdhani")
 
         # ADD ELEMENTS TO LAYOUTS
         self.hLayout.addWidget(self.app_icon, 0)
@@ -86,6 +86,92 @@ class ListWidget(QWidget):
         self.app_icon.setPixmap(QPixmap(imagePath))
 
 
+class TextEdit(QTextEdit):
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("entry")
+        self.setPlaceholderText("Please type 'exit' to exit!")
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QTextEdit.NoWrap)
+        self.setFixedHeight(50)
+
+    def keyPressEvent(self, e: QKeyEvent):
+        if e.key() == Qt.Key_Return:
+            pass
+        else:
+            super().keyPressEvent(e)
+
+
+class Highlighter(QSyntaxHighlighter):
+    def __init__(self, parent=None):
+        super(Highlighter, self).__init__(parent)
+
+        keywordFormat = QTextCharFormat()
+        keywordFormat.setForeground(QColor("#5dbcd2"))
+        keywordFormat.setFontWeight(QFont.Bold)
+
+        keywordPatterns = ["\\bapp\\b", "\\bgoogle\\b", "\\byoutube\\b"]
+
+        self.highlightingRules = [(QRegExp(pattern), keywordFormat)
+                                  for pattern in keywordPatterns]
+
+        classFormat = QTextCharFormat()
+        classFormat.setForeground(Qt.darkMagenta)
+        self.highlightingRules.append((QRegExp("\\bQ[A-Za-z]+\\b"),
+                                       classFormat))
+
+        singleLineCommentFormat = QTextCharFormat()
+        singleLineCommentFormat.setForeground(Qt.red)
+        self.highlightingRules.append((QRegExp("//[^\n]*"),
+                                       singleLineCommentFormat))
+
+        self.multiLineCommentFormat = QTextCharFormat()
+        self.multiLineCommentFormat.setForeground(Qt.red)
+
+        quotationFormat = QTextCharFormat()
+        quotationFormat.setForeground(Qt.darkGreen)
+        self.highlightingRules.append((QRegExp("\".*\""), quotationFormat))
+
+        functionFormat = QTextCharFormat()
+        functionFormat.setFontItalic(True)
+        functionFormat.setForeground(Qt.blue)
+        self.highlightingRules.append((QRegExp("\\b[A-Za-z0-9_]+(?=\\()"),
+                                       functionFormat))
+
+        self.commentStartExpression = QRegExp("/\\*")
+        self.commentEndExpression = QRegExp("\\*/")
+
+    def highlightBlock(self, text):
+        for pattern, format in self.highlightingRules:
+            expression = QRegExp(pattern)
+            index = expression.indexIn(text)
+            while index >= 0:
+                length = expression.matchedLength()
+                self.setFormat(index, length, format)
+                index = expression.indexIn(text, index + length)
+
+        self.setCurrentBlockState(0)
+
+        startIndex = 0
+        if self.previousBlockState() != 1:
+            startIndex = self.commentStartExpression.indexIn(text)
+
+        while startIndex >= 0:
+            endIndex = self.commentEndExpression.indexIn(text, startIndex)
+
+            if endIndex == -1:
+                self.setCurrentBlockState(1)
+                commentLength = len(text) - startIndex
+            else:
+                commentLength = endIndex - startIndex + self.commentEndExpression.matchedLength()
+
+            self.setFormat(startIndex, commentLength,
+                           self.multiLineCommentFormat)
+            startIndex = self.commentStartExpression.indexIn(text, startIndex + commentLength)
+
+
 class MainFrame(QFrame):
 
     def __init__(self, parent=None):
@@ -98,9 +184,8 @@ class MainFrame(QFrame):
         _layout.setSpacing(20)
         _layout.setContentsMargins(20, 20, 20, 20)
 
-        self.entry = QLineEdit()
-        self.entry.setPlaceholderText("Please type 'exit' to exit!")
-        self.entry.setObjectName("entry")
+        self.entry = TextEdit()
+        self.highlighter = Highlighter(self.entry.document())
 
         self.result_list = QListWidget()
         self.result_list.setObjectName("result_list")

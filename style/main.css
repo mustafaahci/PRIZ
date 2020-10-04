@@ -1,5 +1,5 @@
 #MainFrame{
-    background-color: #212121;
+    background-color: #151515;
 }
 
 #entry{
@@ -7,7 +7,7 @@
     outline: none;
     background-color: transparent;
     color: white;
-    font: 24px Comfortaa;
+    font: 26px Rajdhani;
 }
 
 #result_list{
