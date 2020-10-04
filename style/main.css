@@ -9,3 +9,13 @@
     color: white;
     font: 24px Comfortaa;
 }
+
+#result_list{
+    border: none;
+    outline: none;
+    background-color: transparent;
+}
+
+#result_list::item{
+    color: transparent;
+}
