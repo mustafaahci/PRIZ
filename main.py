@@ -1,23 +1,68 @@
-import sys
-import json
 import ctypes
+import json
+import os
+import sys
+import typing
 from ctypes import wintypes
 
-
-import typing
 import PySide2
-from PySide2.QtCore import QRect, Qt
-from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLineEdit
-from PySide2.QtWinExtras import QtWin
-
 import win32api
 import win32gui
-from win32con import GWL_STYLE, WM_NCCALCSIZE, WS_CAPTION
+from PySide2.QtCore import QRect, Qt
+from PySide2.QtGui import QPixmap
+from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLineEdit, QLabel, QHBoxLayout
+from PySide2.QtWinExtras import QtWin
+from win32con import GWL_STYLE, WM_NCCALCSIZE, WS_CAPTION, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW
+
+
+def readCss(path) -> str:
+    with open(path, "r") as css:
+        style = css.read()
+    return style
 
 
 def clearLayout(layout: QLayout) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
+
+
+class ListWidget(QWidget):
+
+    def __init__(self, name: str):
+        super().__init__()
+        self.name = name
+        self.setStyleSheet("background: transparent;")
+        # ELEMENTS
+        self.app_name = QLabel()
+        self.app_description = QLabel("description")
+        self.app_icon = QLabel()
+
+        # LAYOUTS
+        self.vLayout = QVBoxLayout()
+        self.hLayout = QHBoxLayout()
+
+        # STAFF
+        self.app_name.setStyleSheet("color: #FFFFFF; font: 14px Comfortaa")
+        self.app_description.setStyleSheet("color: rgba(255,255,255,.5);")
+
+        # ADD ELEMENTS TO LAYOUTS
+        self.hLayout.addWidget(self.app_icon, 0)
+        self.hLayout.addLayout(self.vLayout, 1)
+        self.vLayout.addWidget(self.app_name)
+        self.vLayout.addWidget(self.app_description)
+        self.vLayout.addStretch()
+
+        self.vLayout.setContentsMargins(15, 0, 0, 0)
+        self.hLayout.setContentsMargins(16, 16, 16, 16)
+
+        self.setLayout(self.hLayout)
+
+    def setText(self, text, description):
+        self.app_name.setText(text)
+        self.app_description.setText(description)
+
+    def setIcon(self, imagePath):
+        self.app_icon.setPixmap(QPixmap(imagePath))
 
 
 class MainFrame(QFrame):
@@ -31,14 +76,12 @@ class MainFrame(QFrame):
         _layout.setContentsMargins(20, 10, 20, 10)
 
         self.entry = QLineEdit()
-        self.entry.setPlaceholderText("Please type `exit` to exit!")
+        self.entry.setPlaceholderText("Please type 'exit' to exit!")
         self.entry.setObjectName("entry")
 
         _layout.addWidget(self.entry)
 
-        with open("style/main.css", "r") as css:
-            style = css.read()
-            self.setStyleSheet(style)
+        self.setStyleSheet(readCss("style/main.css"))
 
         self.setLayout(_layout)
 
@@ -56,6 +99,8 @@ class MainWindow(QWidget):
         hWnd = self.winId()
         style = win32gui.GetWindowLong(hWnd, GWL_STYLE)
         win32gui.SetWindowLong(hWnd, GWL_STYLE, style | WS_CAPTION)
+        win32gui.SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0,
+                              SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
 
         if QtWin.isCompositionEnabled():
             # Don't working PySide2 < v: 5.15.1)
@@ -66,10 +111,14 @@ class MainWindow(QWidget):
         _layout = QVBoxLayout()
         clearLayout(_layout)
 
-        _rect: QRect = app.instance().desktop().availableGeometry(self)
+        _rect: QRect = QApplication.instance().desktop().availableGeometry(self)
 
         self._main_frame = MainFrame(self)
         _layout.addWidget(self._main_frame)
+
+        # self.frame = QFrame(self)
+        # self.frame.setStyleSheet("background: green;")
+        # self.frame.setGeometry(0, 95, 250, 5)
 
         x = _rect.width() / 2 - WIDTH / 2
         y = _rect.height() / 2 - HEIGHT / 2 - _rect.height() * 15 / 100
@@ -110,6 +159,23 @@ class MainWindow(QWidget):
         return retval, result
 
 
+def getPrograms():
+    programList = []
+    out = os.path.join(os.environ["ALLUSERSPROFILE"], "Start Menu", "Programs")
+
+    for root, dirs, files in os.walk(out):
+        for file in files:
+            if file.endswith(".lnk"):
+                programList.append(str(os.path.join(root, file)))
+
+    with open('database/package.json', 'r', encoding='utf-8') as f:
+        JSON = json.load(f)
+        JSON["APPS"] = programList
+
+    with open('database/package.json', 'w', encoding='utf-8') as f:
+        json.dump(JSON, f, ensure_ascii=False, indent=4)
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
@@ -118,6 +184,16 @@ if __name__ == "__main__":
 
     # TODO: checkout external files
     # TODO: load database / package.json & settings.json
+
+    try:
+        with open('database/package.json', 'r', encoding='utf-8') as f:
+            __JSON = json.load(f)
+            if len(__JSON["APPS"]) == 0:
+                getPrograms()
+    except FileNotFoundError:
+        with open('database/package.json', 'w'):
+            pass
+        getPrograms()
 
     main_window = MainWindow()
     main_window.show()
