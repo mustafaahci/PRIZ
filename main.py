@@ -6,8 +6,9 @@ import ctypes
 from ctypes import wintypes
 from time import time, sleep
 
-from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp
-from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont
+from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp, SIGNAL, SLOT, Slot
+from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont, \
+    QTextBlockFormat
 from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLineEdit, QLabel, QHBoxLayout, \
     QListWidget, QListWidgetItem, QFileIconProvider, QFileSystemModel, QSplashScreen, QTextEdit
 
@@ -63,8 +64,8 @@ class ListWidget(QWidget):
         self.hLayout = QHBoxLayout()
 
         # STAFF
-        self.app_name.setStyleSheet("color: #FFFFFF; font: 16px Rajdhani")
-        self.app_description.setStyleSheet("color: rgba(255,255,255,.5); font: 14px Rajdhani")
+        self.app_name.setStyleSheet("color: #FFFFFF; font: 18px Rajdhani")
+        self.app_description.setStyleSheet("color: rgba(255,255,255,.5); font: 16px Rajdhani")
 
         # ADD ELEMENTS TO LAYOUTS
         self.hLayout.addWidget(self.app_icon, 0)
@@ -77,6 +78,9 @@ class ListWidget(QWidget):
         self.hLayout.setContentsMargins(16, 16, 16, 16)
 
         self.setLayout(self.hLayout)
+
+    def getText(self):
+        return self.app_name.text()
 
     def setText(self, text, description):
         self.app_name.setText(text)
@@ -95,7 +99,7 @@ class TextEdit(QTextEdit):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setLineWrapMode(QTextEdit.NoWrap)
-        self.setFixedHeight(50)
+        self.setFixedHeight(self.document().size().height() * 2)
 
     def keyPressEvent(self, e: QKeyEvent):
         if e.key() == Qt.Key_Return:
@@ -109,67 +113,28 @@ class Highlighter(QSyntaxHighlighter):
         super(Highlighter, self).__init__(parent)
 
         keywordFormat = QTextCharFormat()
-        keywordFormat.setForeground(QColor("#5dbcd2"))
-        keywordFormat.setFontWeight(QFont.Bold)
+        keywordFormat.setForeground(QColor("#00E5FF"))
+        keywordFormat.setFontWeight(QFont.DemiBold)
 
         keywordPatterns = ["\\bapp\\b", "\\bgoogle\\b", "\\byoutube\\b"]
 
         self.highlightingRules = [(QRegExp(pattern), keywordFormat)
                                   for pattern in keywordPatterns]
 
-        classFormat = QTextCharFormat()
-        classFormat.setForeground(Qt.darkMagenta)
-        self.highlightingRules.append((QRegExp("\\bQ[A-Za-z]+\\b"),
-                                       classFormat))
-
-        singleLineCommentFormat = QTextCharFormat()
-        singleLineCommentFormat.setForeground(Qt.red)
-        self.highlightingRules.append((QRegExp("//[^\n]*"),
-                                       singleLineCommentFormat))
-
-        self.multiLineCommentFormat = QTextCharFormat()
-        self.multiLineCommentFormat.setForeground(Qt.red)
-
-        quotationFormat = QTextCharFormat()
-        quotationFormat.setForeground(Qt.darkGreen)
-        self.highlightingRules.append((QRegExp("\".*\""), quotationFormat))
-
-        functionFormat = QTextCharFormat()
-        functionFormat.setFontItalic(True)
-        functionFormat.setForeground(Qt.blue)
-        self.highlightingRules.append((QRegExp("\\b[A-Za-z0-9_]+(?=\\()"),
-                                       functionFormat))
-
-        self.commentStartExpression = QRegExp("/\\*")
-        self.commentEndExpression = QRegExp("\\*/")
+        # singleLineCommentFormat = QTextCharFormat()
+        # singleLineCommentFormat.setForeground(Qt.red)
+        # self.highlightingRules.append((QRegExp("//[^\n]*"), singleLineCommentFormat))
 
     def highlightBlock(self, text):
-        for pattern, format in self.highlightingRules:
+        for pattern, _format in self.highlightingRules:
             expression = QRegExp(pattern)
             index = expression.indexIn(text)
             while index >= 0:
                 length = expression.matchedLength()
-                self.setFormat(index, length, format)
+                self.setFormat(index, length, _format)
                 index = expression.indexIn(text, index + length)
 
         self.setCurrentBlockState(0)
-
-        startIndex = 0
-        if self.previousBlockState() != 1:
-            startIndex = self.commentStartExpression.indexIn(text)
-
-        while startIndex >= 0:
-            endIndex = self.commentEndExpression.indexIn(text, startIndex)
-
-            if endIndex == -1:
-                self.setCurrentBlockState(1)
-                commentLength = len(text) - startIndex
-            else:
-                commentLength = endIndex - startIndex + self.commentEndExpression.matchedLength()
-
-            self.setFormat(startIndex, commentLength,
-                           self.multiLineCommentFormat)
-            startIndex = self.commentStartExpression.indexIn(text, startIndex + commentLength)
 
 
 class MainFrame(QFrame):
@@ -181,24 +146,41 @@ class MainFrame(QFrame):
         self.provider = QFileIconProvider()
 
         _layout = QVBoxLayout()
-        _layout.setSpacing(20)
-        _layout.setContentsMargins(20, 20, 20, 20)
+        _layout.setSpacing(10)
+        _layout.setContentsMargins(10, 24, 10, 10)
 
         self.entry = TextEdit()
+        self.entry.textChanged.connect(self.textChanged)
         self.highlighter = Highlighter(self.entry.document())
 
         self.result_list = QListWidget()
+        self.result_list.setMinimumHeight(250)
         self.result_list.setObjectName("result_list")
         self.result_list.itemDoubleClicked.connect(self.openProgram)
 
         _layout.addWidget(self.entry)
         _layout.addWidget(self.result_list)
+        _layout.addStretch()
         self.setStyleSheet(readCss("style/main.css"))
         self.setLayout(_layout)
         self.getApps()
 
     def openProgram(self):
         os.startfile(self.result_list.currentItem().text())
+
+    def textChanged(self):
+        text = self.entry.toPlainText()
+        for row in range(self.result_list.count()):
+            it = self.result_list.item(row)
+            widget = self.result_list.itemWidget(it)
+            if text:
+                it.setHidden(not self.filter(text, widget.getText()))
+            else:
+                it.setHidden(False)
+
+    @staticmethod
+    def filter(text: str, keywords: str):
+        return text.lower() in keywords.lower()
 
     @staticmethod
     def getAppIcon(path):
@@ -324,7 +306,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     WIDTH = 1000
-    HEIGHT = 100
+    HEIGHT = 50
     PACKAGE = None
 
     # TODO: checkout external files
