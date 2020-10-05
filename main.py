@@ -172,25 +172,38 @@ class MainFrame(QFrame):
         self.setLayout(_layout)
         self.getApps()
 
+    def countVisibleItems(self):
+        visible_count = 0
+        item_count = self.result_list.count()
+        for row in range(item_count):
+            if not self.result_list.isRowHidden(row):
+                visible_count += 1
+                if visible_count >= 3:
+                    return 3
+        return visible_count
+
     def openProgram(self):
         os.startfile(self.result_list.currentItem().text())
 
     def textChanged(self):
         text = self.entry.toPlainText()
+
         if text == "":
             self.result_list.setFixedHeight(0)
             self.parent().setFixedHeight(85)
         else:
-            self.result_list.setFixedHeight(250)
-            self.parent().setFixedHeight(85 + 250)
-
             for row in range(self.result_list.count()):
                 it = self.result_list.item(row)
+
                 widget = self.result_list.itemWidget(it)
                 if text:
                     it.setHidden(not self.filter(text, widget.getText()))
                 else:
                     it.setHidden(False)
+
+            _h = self.result_list.sizeHintForRow(0) * self.countVisibleItems()
+            self.result_list.setFixedHeight(_h)
+            self.parent().setFixedHeight(85 + _h)
 
     @staticmethod
     def filter(text: str, keywords: str):
