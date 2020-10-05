@@ -3,13 +3,13 @@ import sys
 import json
 import typing
 import ctypes
+import getpass
 from ctypes import wintypes
 from time import time, sleep
 
-from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp, SIGNAL, SLOT, Slot
-from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont, \
-    QTextBlockFormat
-from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLineEdit, QLabel, QHBoxLayout, \
+from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp
+from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont, QResizeEvent
+from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLabel, QHBoxLayout, \
     QListWidget, QListWidgetItem, QFileIconProvider, QFileSystemModel, QSplashScreen, QTextEdit
 
 import win32api
@@ -82,9 +82,15 @@ class ListWidget(QWidget):
     def getText(self):
         return self.app_name.text()
 
+    def getDescription(self):
+        return self.app_description.text()
+
     def setText(self, text, description):
         self.app_name.setText(text)
-        self.app_description.setText(description)
+        if len(description) < 120:
+            self.app_description.setText(description)
+        else:
+            self.app_description.setText(description[:120] + "...")
 
     def setIcon(self, imagePath):
         self.app_icon.setPixmap(QPixmap(imagePath))
@@ -99,7 +105,7 @@ class TextEdit(QTextEdit):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setLineWrapMode(QTextEdit.NoWrap)
-        self.setFixedHeight(self.document().size().height() * 2)
+        self.setFixedHeight(41)
 
     def keyPressEvent(self, e: QKeyEvent):
         if e.key() == Qt.Key_Return:
@@ -147,16 +153,17 @@ class MainFrame(QFrame):
 
         _layout = QVBoxLayout()
         _layout.setSpacing(10)
-        _layout.setContentsMargins(10, 24, 10, 10)
+        _layout.setContentsMargins(10, 23, 10, 10)
 
         self.entry = TextEdit()
         self.entry.textChanged.connect(self.textChanged)
         self.highlighter = Highlighter(self.entry.document())
 
         self.result_list = QListWidget()
-        self.result_list.setMinimumHeight(250)
+        self.result_list.setFixedHeight(0)
         self.result_list.setObjectName("result_list")
         self.result_list.itemDoubleClicked.connect(self.openProgram)
+        self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         _layout.addWidget(self.entry)
         _layout.addWidget(self.result_list)
@@ -170,13 +177,20 @@ class MainFrame(QFrame):
 
     def textChanged(self):
         text = self.entry.toPlainText()
-        for row in range(self.result_list.count()):
-            it = self.result_list.item(row)
-            widget = self.result_list.itemWidget(it)
-            if text:
-                it.setHidden(not self.filter(text, widget.getText()))
-            else:
-                it.setHidden(False)
+        if text == "":
+            self.result_list.setFixedHeight(0)
+            self.parent().setFixedHeight(85)
+        else:
+            self.result_list.setFixedHeight(250)
+            self.parent().setFixedHeight(85 + 250)
+
+            for row in range(self.result_list.count()):
+                it = self.result_list.item(row)
+                widget = self.result_list.itemWidget(it)
+                if text:
+                    it.setHidden(not self.filter(text, widget.getText()))
+                else:
+                    it.setHidden(False)
 
     @staticmethod
     def filter(text: str, keywords: str):
@@ -195,7 +209,6 @@ class MainFrame(QFrame):
     def getApps(self):
         for app_path in PACKAGE["APPS"]:
             app_name = str(os.path.basename(app_path)).split(".")[0]
-            print(app_path)
 
             new_widget = ListWidget(app_name)
             new_widget.setText(app_name, app_path)
@@ -285,9 +298,15 @@ class MainWindow(QWidget):
 
 def getPrograms():
     programList = []
-    out = os.path.join(os.environ["ALLUSERSPROFILE"], "Start Menu", "Programs")
+    _ALLUSERSPROFILE = os.path.join(os.environ["ALLUSERSPROFILE"], "Start Menu", "Programs")
+    _USERPROFILE = os.path.join(os.environ['USERPROFILE'] + r"\AppData\Roaming\Microsoft\Windows\Start Menu")
 
-    for root, dirs, files in os.walk(out):
+    for root, dirs, files in os.walk(_ALLUSERSPROFILE):
+        for file in files:
+            if file.endswith(".lnk"):
+                programList.append(str(os.path.join(root, file)))
+
+    for root, dirs, files in os.walk(_USERPROFILE):
         for file in files:
             if file.endswith(".lnk"):
                 programList.append(str(os.path.join(root, file)))
@@ -306,11 +325,12 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     WIDTH = 1000
-    HEIGHT = 50
+    HEIGHT = 85
     PACKAGE = None
 
     # TODO: checkout external files
     # TODO: load database / package.json & settings.json
+    # TODO: fix resize
 
     try:
         with open('database/package.json', 'r', encoding='utf-8') as f:
