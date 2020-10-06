@@ -1,21 +1,20 @@
+import ctypes
+import json
 import os
 import sys
-import json
 import typing
-import ctypes
-import getpass
 from ctypes import wintypes
 from time import time, sleep
 
-from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp
-from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont, QResizeEvent
-from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLabel, QHBoxLayout, \
-    QListWidget, QListWidgetItem, QFileIconProvider, QFileSystemModel, QSplashScreen, QTextEdit
-
 import win32api
 import win32gui
-import win32com.client
+from PySide2.QtCore import QRect, Qt, QSize, QFileInfo, QRegExp, QThread, Signal
+from PySide2.QtGui import QPixmap, QPalette, QKeyEvent, QTextCharFormat, QSyntaxHighlighter, QColor, QFont
+from PySide2.QtWidgets import QLayout, QFrame, QVBoxLayout, QWidget, QApplication, QLabel, QHBoxLayout, \
+    QListWidget, QListWidgetItem, QFileSystemModel, QSplashScreen, QTextEdit, QAction, QMenu, \
+    QSystemTrayIcon, QStyle
 from PySide2.QtWinExtras import QtWin
+from pynput.keyboard import Key, Listener
 from win32con import GWL_STYLE, WM_NCCALCSIZE, WS_CAPTION, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW
 
 
@@ -98,8 +97,8 @@ class ListWidget(QWidget):
 
 class TextEdit(QTextEdit):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setObjectName("entry")
         self.setPlaceholderText("Please type 'exit' to exit!")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -109,7 +108,7 @@ class TextEdit(QTextEdit):
 
     def keyPressEvent(self, e: QKeyEvent):
         if e.key() == Qt.Key_Return:
-            pass
+            self.parent().openProgram()
         else:
             super().keyPressEvent(e)
 
@@ -122,7 +121,7 @@ class Highlighter(QSyntaxHighlighter):
         keywordFormat.setForeground(QColor("#00E5FF"))
         keywordFormat.setFontWeight(QFont.DemiBold)
 
-        keywordPatterns = ["\\bapp\\b", "\\bgoogle\\b", "\\byoutube\\b"]
+        keywordPatterns = ["\\b" + syntax + "\\b" for syntax in SYNTAXS]
 
         self.highlightingRules = [(QRegExp(pattern), keywordFormat)
                                   for pattern in keywordPatterns]
@@ -143,19 +142,73 @@ class Highlighter(QSyntaxHighlighter):
         self.setCurrentBlockState(0)
 
 
+# noinspection PyUnresolvedReferences
+class KeyThread(QThread):
+    """ KEY LISTENER """
+    update = Signal(bool)
+    tray_icon = Signal(bool)
+    current_row = Signal(int)
+
+    def __init__(self, parent=None):
+        QThread.__init__(self)
+        self.setParent(parent)
+        self.result_list = self.parent().getResultList()
+        self.entry = self.parent().getEntry()
+
+    def run(self):
+        """ WORKING """
+        # The key combination to check
+        COMBINATION = {Key.ctrl_l, Key.space}
+        # The currently active modifiers
+        current = set()
+
+        def on_press(key):
+            """ KEY LISTENER FUNC"""
+            if key in COMBINATION:
+                current.add(key)
+                if all(k in current for k in COMBINATION):
+                    if main_window.isHidden():
+                        self.update.emit(True)
+                        self.tray_icon.emit(False)
+                    else:
+                        self.update.emit(False)
+                        self.tray_icon.emit(True)
+
+            if self.entry.hasFocus() and self.result_list.count():
+                if key == Key.down:
+                    if not self.result_list.currentRow() == (self.result_list.count() - 1):
+                        self.current_row.emit(self.parent().nextVisibleItem())
+
+                if key == Key.up:
+                    if not self.result_list.currentRow() == 0:
+                        self.current_row.emit(self.parent().prevVisibleItem())
+
+            if key == Key.esc:
+                listener.stop()
+
+        def on_release(key):
+            """ REMOVE """
+            try:
+                current.remove(key)
+            except KeyError:
+                pass
+
+        with Listener(on_press=on_press, on_release=on_release) as listener:
+            listener.join()
+
+
 class MainFrame(QFrame):
 
+    # noinspection PyUnresolvedReferences
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MainFrame")
-        self.shell = win32com.client.Dispatch("WScript.Shell")
-        self.provider = QFileIconProvider()
 
         _layout = QVBoxLayout()
         _layout.setSpacing(10)
         _layout.setContentsMargins(10, 23, 10, 10)
 
-        self.entry = TextEdit()
+        self.entry = TextEdit(self)
         self.entry.textChanged.connect(self.textChanged)
         self.highlighter = Highlighter(self.entry.document())
 
@@ -165,12 +218,25 @@ class MainFrame(QFrame):
         self.result_list.itemDoubleClicked.connect(self.openProgram)
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
+        key_thread = KeyThread(self)
+        key_thread.start()
+
+        key_thread.update.connect(self.parent().setVisible)
+        key_thread.tray_icon.connect(self.parent().tray_icon.setVisible)
+        key_thread.current_row.connect(self.result_list.setCurrentRow)
+
         _layout.addWidget(self.entry)
         _layout.addWidget(self.result_list)
         _layout.addStretch()
         self.setStyleSheet(readCss("style/main.css"))
         self.setLayout(_layout)
         self.getApps()
+
+    def getResultList(self):
+        return self.result_list
+
+    def getEntry(self):
+        return self.entry
 
     def countVisibleItems(self):
         visible_count = 0
@@ -182,13 +248,31 @@ class MainFrame(QFrame):
                     return 3
         return visible_count
 
+    def nextVisibleItem(self):
+        for row in range(self.result_list.currentRow() + 1, self.result_list.count()):
+            if not self.result_list.isRowHidden(row):
+                return row
+        return self.result_list.currentRow()
+
+    def prevVisibleItem(self):
+        for row in range(self.result_list.currentRow() - 1, -1, -1):
+            if not self.result_list.isRowHidden(row):
+                return row
+        return self.result_list.currentRow()
+
+    def firstVisibleRow(self):
+        for row in range(self.result_list.count()):
+            if not self.result_list.isRowHidden(row):
+                return row
+        return -1
+
     def openProgram(self):
         os.startfile(self.result_list.currentItem().text())
+        main_window.hide()
 
     def textChanged(self):
         text = self.entry.toPlainText()
-
-        if text == "":
+        if text.isspace() or not text:
             self.result_list.setFixedHeight(0)
             self.parent().setFixedHeight(85)
         else:
@@ -204,6 +288,7 @@ class MainFrame(QFrame):
             _h = self.result_list.sizeHintForRow(0) * self.countVisibleItems()
             self.result_list.setFixedHeight(_h)
             self.parent().setFixedHeight(85 + _h)
+            self.result_list.setCurrentRow(self.firstVisibleRow())
 
     @staticmethod
     def filter(text: str, keywords: str):
@@ -220,7 +305,7 @@ class MainFrame(QFrame):
         return icon
 
     def getApps(self):
-        for app_path in PACKAGE["APPS"]:
+        for app_path in APPS["APPS"]:
             app_name = str(os.path.basename(app_path)).split(".")[0]
 
             new_widget = ListWidget(app_name)
@@ -246,13 +331,32 @@ class MainWindow(QWidget):
 
         self.__press_pos = None
 
+        show_action = QAction("Show", self)
+        quit_action = QAction("Exit", self)
+        hide_action = QAction("Hide", self)
+        show_action.triggered.connect(self.show)
+        hide_action.triggered.connect(self.hide)
+        quit_action.triggered.connect(app.quit)
+        tray_menu = QMenu()
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(hide_action)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray_icon.setContextMenu(tray_menu)
+
         _layout = clearLayout(QVBoxLayout())
         self._main_frame = MainFrame(self)
         _layout.addWidget(self._main_frame)
 
+        # Keyboard Shortcuts
+        # self.switch_visibility = QShortcut(QKeySequence('Alt+Space'), self)
+        # self.switch_visibility.activated.connect(self.switchVisibility)
+
         # self.frame = QFrame(self)
         # self.frame.setStyleSheet("background: green;")
-        # self.frame.setGeometry(0, 95, 250, 5)
+        # self.frame.setGeometry(0, 0, 250, 5)
 
         self.show()
 
@@ -310,23 +414,23 @@ class MainWindow(QWidget):
 
 
 def getPrograms():
-    programList = []
+    program_list = []
     _ALLUSERSPROFILE = os.path.join(os.environ["ALLUSERSPROFILE"], "Start Menu", "Programs")
     _USERPROFILE = os.path.join(os.environ['USERPROFILE'] + r"\AppData\Roaming\Microsoft\Windows\Start Menu")
 
     for root, dirs, files in os.walk(_ALLUSERSPROFILE):
         for file in files:
             if file.endswith(".lnk"):
-                programList.append(str(os.path.join(root, file)))
+                program_list.append(str(os.path.join(root, file)))
 
     for root, dirs, files in os.walk(_USERPROFILE):
         for file in files:
             if file.endswith(".lnk"):
-                programList.append(str(os.path.join(root, file)))
+                program_list.append(str(os.path.join(root, file)))
 
     with open('database/package.json', 'r', encoding='utf-8') as file:
         JSON = json.load(file)
-        JSON["APPS"] = programList
+        JSON["APPS"] = program_list
 
     with open('database/package.json', 'w', encoding='utf-8') as file:
         json.dump(JSON, file, ensure_ascii=False, indent=4)
@@ -339,7 +443,8 @@ if __name__ == "__main__":
 
     WIDTH = 1000
     HEIGHT = 85
-    PACKAGE = None
+    APPS = None
+    SYNTAXS = None
 
     # TODO: checkout external files
     # TODO: load database / package.json & settings.json
@@ -349,13 +454,14 @@ if __name__ == "__main__":
         with open('database/package.json', 'r', encoding='utf-8') as f:
             __JSON = json.load(f)
             if len(__JSON["APPS"]) == 0:
-                PACKAGE = getPrograms()
+                APPS = getPrograms()
             else:
-                PACKAGE = __JSON
+                APPS = __JSON
+            SYNTAXS = __JSON["SYNTAXS"]
     except FileNotFoundError:
         with open('database/package.json', 'w'):
             pass
-        PACKAGE = getPrograms()
+        APPS = getPrograms()
 
     # splash_screen = SplashScreen()
     start = time()
@@ -364,7 +470,7 @@ if __name__ == "__main__":
     while time() - start < 1:
         sleep(0.001)
         app.processEvents()
-    MainWindow = MainWindow()
-    splash.finish(MainWindow)
+    main_window = MainWindow()
+    splash.finish(main_window)
 
     sys.exit(app.exec_())
